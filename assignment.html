@@ -1,0 +1,2019 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Search and Rescue Drone Simulation</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            display: block;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            pointer-events: none;
+            text-shadow: 1px 1px 1px black;
+            z-index: 100;
+            font-size: 18px;
+        }
+        #controls {
+            position: absolute;
+            top: 50px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            text-shadow: 1px 1px 1px black;
+            z-index: 100;
+        }
+        button {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            margin: 0 5px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #2980b9;
+        }
+        #laptop-screen {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 320px;
+            height: 240px;
+            background-color: #1a1a1a;
+            border: 3px solid #444;
+            border-radius: 5px;
+            z-index: 100;
+            color: white;
+            overflow: hidden;
+        }
+        #laptop-header {
+            background-color: #444;
+            padding: 5px;
+            text-align: center;
+            font-weight: bold;
+            border-bottom: 2px solid #555;
+        }
+        #thermal-view {
+            width: 320px;
+            height: 204px;
+            background-color: black;
+            position: relative;
+        }
+        .heat-signature {
+            position: absolute;
+            border-radius: 50%;
+            opacity: 0.8;
+            filter: blur(5px);
+            box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+        }
+        .status-indicator {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: #00ff00;
+            font-size: 12px;
+            font-family: monospace;
+        }
+        .coordinates {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: #00ff00;
+            font-size: 12px;
+            font-family: monospace;
+        }
+        .heat-reading {
+            position: absolute;
+            top: 30px;
+            left: 10px;
+            color: #00ff00;
+            font-size: 12px;
+            font-family: monospace;
+        }
+        .scan-line {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 2px;
+            width: 100%;
+            background-color: rgba(0, 255, 0, 0.7);
+            box-shadow: 0 0 10px rgba(0, 255, 0, 0.7);
+        }
+        #mission-status {
+            position: absolute;
+            top: 100px;
+            left: 20px;
+            padding: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            border: 1px solid #444;
+            border-radius: 5px;
+            color: white;
+            z-index: 100;
+            font-size: 14px;
+            max-width: 250px;
+        }
+        #toggle-view {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #e74c3c;
+            z-index: 101;
+        }
+        #remote-connection {
+            position: absolute;
+            top: 10px;
+            left: 20px;
+            padding: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            border: 1px solid #444;
+            border-radius: 5px;
+            color: white;
+            z-index: 100;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">Advanced Search and Rescue Drone Simulation</div>
+    <div id="controls">
+        <button id="start-auto">Start Automatic Search</button>
+        <button id="manual-control">Manual Control</button>
+        <button id="toggle-thermal">Toggle Thermal View</button>
+        <button id="connect-remote">Connect Remote Laptop</button>
+    </div>
+
+    <div id="mission-status">
+        <h3>Mission Status: Standby</h3>
+        <p>Search pattern: None</p>
+        <p>People detected: 0</p>
+        <p>Drone altitude: 5m</p>
+    </div>
+
+    <div id="remote-connection">
+        <h3>Remote Connection</h3>
+        <div id="connection-status">Status: Disconnected</div>
+        <div id="connection-id" style="font-size: 12px; word-break: break-all;"></div>
+    </div>
+
+    <div id="laptop-screen">
+        <div id="laptop-header">THERMAL IMAGING SYSTEM</div>
+        <div id="thermal-view">
+            <div class="status-indicator">STATUS: STANDBY</div>
+            <div class="coordinates">POS: 0.0, 0.0</div>
+            <div class="heat-reading">HEAT: --°C</div>
+            <div class="scan-line"></div>
+        </div>
+    </div>
+
+    <button id="toggle-view">Switch View</button>
+
+    <!-- Add Socket.io -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <!-- Add PeerJS for WebRTC connections -->
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+
+    <script type="module">
+        import * as THREE from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.1/three.module.min.js';
+
+        // WebRTC connection for real-time log sharing
+        let peer = null;
+        let connection = null;
+        let isRemoteConnected = false;
+        let isHost = true; // By default, this is the host
+        let connectionId = null;
+        
+        // Setup connection when connect button is clicked
+        document.getElementById('connect-remote').addEventListener('click', () => {
+            setupPeerConnection();
+        });
+        
+        function setupPeerConnection() {
+            if (peer) {
+                // If already connected, disconnect first
+                if (connection) {
+                    connection.close();
+                }
+                peer.destroy();
+                document.getElementById('connection-status').textContent = 'Status: Disconnected';
+                document.getElementById('connection-id').textContent = '';
+                isRemoteConnected = false;
+                peer = null;
+                connection = null;
+                return;
+            }
+            
+            // Ask if this is host or remote
+            const mode = prompt("Enter 'host' to start as main drone control or 'remote' followed by connection ID to connect to an existing session", "host");
+            
+            if (!mode) return;
+            
+            // Initialize the Peer object
+            peer = new Peer({
+                // Using public PeerJS server
+                host: 'peerjs-server.herokuapp.com',
+                secure: true,
+                port: 443,
+                debug: 3
+            });
+            
+            peer.on('open', (id) => {
+                console.log('My PeerJS ID is:', id);
+            
+            if (mode.toLowerCase().startsWith('remote')) {
+                isHost = false;
+                // Extract connection ID if provided
+                if (mode.toLowerCase() !== 'remote') {
+                    connectionId = mode.substring(6).trim();
+            } else {
+                        connectionId = prompt("Please enter the host's connection ID:");
+                    }
+                    
+                    if (!connectionId) {
+                        alert('Please provide a connection ID');
+                        return;
+                    }
+                    
+                    // Connect to the host
+                    document.getElementById('connection-status').textContent = 'Status: Connecting to Host...';
+                    document.getElementById('connection-id').textContent = `Host ID: ${connectionId}`;
+                    
+                    // Create the log display immediately for the remote client
+                    if (!logElement) {
+                        createLogDisplay();
+                    }
+                    
+                    // Connect to the host peer
+                    connection = peer.connect(connectionId, {
+                        reliable: true
+                    });
+                    
+                    setupDataConnection();
+                    
+                    // Send initial data immediately
+                    sendLogUpdate();
+                    
+                    // Start regular updates
+                    startRegularUpdates();
+                } else {
+                    isHost = true;
+                    connectionId = id; // Use the PeerJS generated ID
+                    document.getElementById('connection-status').textContent = 'Status: Host Waiting for Connection';
+                    document.getElementById('connection-id').textContent = `Your ID: ${connectionId}`;
+                    
+                    // Display the connection instructions
+                    alert(`Your connection ID is: ${connectionId}\n\n` +
+                          `To connect from another computer:\n` +
+                          `1. Open the same HTML file\n` +
+                          `2. Click "Connect Remote Laptop"\n` +
+                          `3. Enter "remote ${connectionId}"\n\n` +
+                          `Note: Both computers must have internet access.`);
+                    
+                    // Handle incoming connections
+                    peer.on('connection', (conn) => {
+                        connection = conn;
+                        setupDataConnection();
+                        
+                isRemoteConnected = true;
+                        document.getElementById('connection-status').textContent = 'Status: Remote Connected';
+                        
+                        // Send initial data immediately
+                        sendLogUpdate();
+                        
+                        // Start regular updates
+                        startRegularUpdates();
+                    });
+                }
+            });
+            
+            peer.on('error', (err) => {
+                console.error('PeerJS error:', err);
+                document.getElementById('connection-status').textContent = `Status: Connection Error - ${err.type}`;
+            });
+        }
+        
+        function setupDataConnection() {
+            connection.on('open', () => {
+                console.log('Data connection established');
+                
+                if (!isHost) {
+                    document.getElementById('connection-status').textContent = 'Status: Connected to Host';
+                    isRemoteConnected = true;
+                } else {
+                    document.getElementById('connection-status').textContent = 'Status: Remote Connected';
+                    isRemoteConnected = true;
+                }
+            });
+            
+            connection.on('data', (data) => {
+                console.log('Received data:', data);
+                
+                if (!isHost) {
+                    // Handle data as client
+                    if (data.logs) {
+                        detectedPeopleLog = data.logs;
+                        updateLogDisplay(false); // Update without triggering sending
+                    }
+                    
+                    if (data.mission) {
+                        missionStatus = data.mission.status;
+                        searchPattern = data.mission.pattern;
+                        peopleDetected = data.mission.peopleCount;
+                        updateMissionStatus(false); // Update without triggering sending
+                    }
+                }
+            });
+            
+            connection.on('close', () => {
+                console.log('Connection closed');
+                document.getElementById('connection-status').textContent = 'Status: Connection Closed';
+                isRemoteConnected = false;
+            });
+            
+            connection.on('error', (err) => {
+                console.error('Connection error:', err);
+                document.getElementById('connection-status').textContent = 'Status: Connection Error';
+                isRemoteConnected = false;
+            });
+        }
+        
+        function sendLogUpdate() {
+            if (isHost && isRemoteConnected && connection) {
+                const data = {
+                    timestamp: new Date().getTime(),
+                    logs: detectedPeopleLog,
+                    mission: {
+                        status: missionStatus,
+                        pattern: searchPattern,
+                        peopleCount: peopleDetected,
+                        dronePosition: {
+                            x: droneGroup.position.x,
+                            y: droneGroup.position.y,
+                            z: droneGroup.position.z
+                        }
+                    }
+                };
+                
+                try {
+                    connection.send(data);
+                } catch (e) {
+                    console.error('Error sending data:', e);
+                }
+            }
+        }
+        
+        // Update the log display - Add parameter to control whether to send updates
+        function updateLogDisplay(shouldSendUpdate = true) {
+            if (!logElement) {
+                createLogDisplay();
+            }
+            
+            if (detectedPeopleLog.length === 0) {
+                logElement.innerHTML = '<h3>Detection Log</h3><p>No detections yet</p>';
+                return;
+            }
+            
+            let logHTML = '<h3>Detection Log</h3>';
+            logHTML += `<p>Total people detected: ${detectedPeopleLog.length}</p>`;
+            logHTML += '<ul style="padding-left: 15px;">';
+            
+            detectedPeopleLog.forEach((person, index) => {
+                let temperatureColor = 'white';
+                if (person.temperature < 35) temperatureColor = '#00f'; // blue for cold
+                else if (person.temperature > 38) temperatureColor = '#f00'; // red for hot
+                else temperatureColor = '#ff0'; // yellow for normal
+                
+                logHTML += `<li>Person #${index + 1}: Position (${person.x.toFixed(1)}, ${person.z.toFixed(1)}), 
+                           Temp: <span style="color:${temperatureColor}">${person.temperature.toFixed(1)}°C</span>, 
+                           Pose: ${person.pose}</li>`;
+            });
+            
+            logHTML += '</ul>';
+            logElement.innerHTML = logHTML;
+            
+            // Send updated log to remote laptop if connected and we should send updates
+            if (shouldSendUpdate) {
+                sendLogUpdate();
+            }
+        }
+
+        // Update mission status display - Add parameter to control whether to send updates
+        function updateMissionStatus(shouldSendUpdate = true) {
+            const statusElem = document.getElementById('mission-status');
+            statusElem.innerHTML = `
+                <h3>Mission Status: ${missionStatus}</h3>
+                <p>Search pattern: ${searchPattern}</p>
+                <p>People detected: ${peopleDetected}</p>
+                <p>Drone altitude: ${droneGroup.position.y.toFixed(1)}m</p>
+            `;
+            
+            // Send updated mission status to remote laptop if connected
+            if (shouldSendUpdate) {
+                sendLogUpdate();
+            }
+        }
+        
+        // Scene setup
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB); // Sky blue background
+
+        // Cameras setup - Main camera and drone POV camera
+        const mainCamera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        mainCamera.position.set(0, 15, 30);
+        mainCamera.lookAt(0, 0, 0);
+
+        const dronePOVCamera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+        // Current active camera
+        let activeCamera = mainCamera;
+
+        // Renderer setup
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(5, 30, 7);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.mapSize.width = 2048;
+        directionalLight.shadow.mapSize.height = 2048;
+        directionalLight.shadow.camera.near = 0.5;
+        directionalLight.shadow.camera.far = 100;
+        directionalLight.shadow.camera.left = -50;
+        directionalLight.shadow.camera.right = 50;
+        directionalLight.shadow.camera.top = 50;
+        directionalLight.shadow.camera.bottom = -50;
+        scene.add(directionalLight);
+
+        // Create terrain
+        const terrainSize = 200;
+        const terrainResolution = 100;
+        const terrainGeometry = new THREE.PlaneGeometry(terrainSize, terrainSize, terrainResolution, terrainResolution);
+        const terrainMaterial = new THREE.MeshStandardMaterial({
+            color: 0x3B7A57, // Forest green
+            roughness: 0.8,
+            metalness: 0.2,
+        });
+
+        // Create a heightmap for the terrain
+        const vertices = terrainGeometry.getAttribute('position').array;
+
+        // Generate some mountains and valleys
+        for (let i = 0; i < vertices.length; i += 3) {
+            const x = vertices[i];
+            const z = vertices[i + 2];
+
+            // Apply Perlin-like noise (simplified)
+            let height = Math.sin(x * 0.05) * Math.cos(z * 0.05) * 3;
+            height += Math.sin(x * 0.1 + 10) * Math.cos(z * 0.1) * 2;
+            height += Math.sin(x * 0.2 + 30) * Math.cos(z * 0.2 + 5) * 1;
+
+            // Add some random small variations
+            height += Math.random() * 0.5;
+
+            // Set the height (y value)
+            vertices[i + 1] = height;
+        }
+
+        terrainGeometry.getAttribute('position').needsUpdate = true;
+        terrainGeometry.computeVertexNormals();
+
+        const terrain = new THREE.Mesh(terrainGeometry, terrainMaterial);
+        terrain.rotation.x = -Math.PI / 2; // Rotate to be horizontal
+        terrain.receiveShadow = true;
+        scene.add(terrain);
+
+        // Add a water plane (for rivers/lakes)
+        const waterGeometry = new THREE.PlaneGeometry(terrainSize, terrainSize);
+        const waterMaterial = new THREE.MeshStandardMaterial({
+            color: 0x1E90FF,
+            transparent: true,
+            opacity: 0.8,
+            roughness: 0.2,
+            metalness: 0.1
+        });
+
+        const water = new THREE.Mesh(waterGeometry, waterMaterial);
+        water.rotation.x = -Math.PI / 2;
+        water.position.y = -2; // Below most of the terrain
+        scene.add(water);
+
+        // Create drone body
+        const droneGroup = new THREE.Group();
+        
+        // Drone movement properties
+        const droneMovement = {
+            velocity: new THREE.Vector3(0, 0, 0),
+            targetPosition: new THREE.Vector3(0, 5, 0),
+            maxSpeed: 20, // Maximum speed
+            acceleration: 8, // How quickly to reach target speed
+            dampening: 0.92, // Dampening factor for smooth deceleration
+            rotationSpeed: 2 // Rotation speed
+        };
+
+        // Main body
+        const bodyGeometry = new THREE.BoxGeometry(2, 0.5, 2);
+        const bodyMaterial = new THREE.MeshStandardMaterial({
+            color: 0xFF5733, // Orange/red for visibility
+            roughness: 0.5,
+            metalness: 0.7
+        });
+        const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+        body.castShadow = true;
+        droneGroup.add(body);
+
+        // Create arms for the rotors
+        const armGeometry = new THREE.CylinderGeometry(0.1, 0.1, 1.5, 8);
+        const armMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
+
+        // Four arms
+        const positions = [
+            { x: 1, y: 0, z: 1, rotation: Math.PI / 4 },
+            { x: -1, y: 0, z: 1, rotation: -Math.PI / 4 },
+            { x: -1, y: 0, z: -1, rotation: Math.PI / 4 },
+            { x: 1, y: 0, z: -1, rotation: -Math.PI / 4 }
+        ];
+
+        // Create rotors and arms
+        const rotors = [];
+        positions.forEach((pos, i) => {
+            // Arm
+            const arm = new THREE.Mesh(armGeometry, armMaterial);
+            arm.position.set(pos.x * 0.7, 0, pos.z * 0.7);
+            arm.rotation.z = pos.rotation;
+            arm.castShadow = true;
+            droneGroup.add(arm);
+
+            // Rotor
+            const rotorGeometry = new THREE.CylinderGeometry(0.5, 0.5, 0.1, 16);
+            const rotorMaterial = new THREE.MeshStandardMaterial({ color: 0x666666 });
+            const rotor = new THREE.Mesh(rotorGeometry, rotorMaterial);
+            rotor.position.set(pos.x, 0.1, pos.z);
+            rotor.rotation.x = Math.PI / 2;
+            rotor.castShadow = true;
+            droneGroup.add(rotor);
+            rotors.push(rotor);
+        });
+
+        // Camera equipment (search and rescue camera)
+        const cameraGeometry = new THREE.CylinderGeometry(0.2, 0.3, 0.5, 12);
+        const cameraMaterial = new THREE.MeshStandardMaterial({ color: 0x222222 });
+        const droneCamera = new THREE.Mesh(cameraGeometry, cameraMaterial);
+        droneCamera.position.y = -0.4;
+        droneCamera.rotation.x = Math.PI / 2;
+        droneCamera.castShadow = true;
+        droneGroup.add(droneCamera);
+
+        // Thermal Camera/Sensor
+        const thermalSensorGeometry = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+        const thermalSensorMaterial = new THREE.MeshStandardMaterial({
+            color: 0x990000,
+            emissive: 0x990000,
+            emissiveIntensity: 0.5
+        });
+        const thermalSensor = new THREE.Mesh(thermalSensorGeometry, thermalSensorMaterial);
+        thermalSensor.position.set(0.4, -0.4, 0);
+        droneGroup.add(thermalSensor);
+
+        // Lens
+        const lensGeometry = new THREE.SphereGeometry(0.1, 16, 16);
+        const lensMaterial = new THREE.MeshStandardMaterial({
+            color: 0x3333ff,
+            metalness: 0.9,
+            roughness: 0.1
+        });
+        const lens = new THREE.Mesh(lensGeometry, lensMaterial);
+        lens.position.y = -0.65;
+        droneGroup.add(lens);
+
+        // Add drone POV camera
+        dronePOVCamera.position.set(0, -0.2, 0);
+        dronePOVCamera.rotation.x = Math.PI / 2;
+        droneGroup.add(dronePOVCamera);
+
+        // Spotlight to represent the search light
+        const spotlight = new THREE.SpotLight(0xFFFFFF, 2);
+        spotlight.position.set(0, -0.5, 0);
+        spotlight.angle = 0.3;
+        spotlight.penumbra = 0.2;
+        spotlight.castShadow = true;
+        spotlight.distance = 30;
+
+        const spotlightTarget = new THREE.Object3D();
+        spotlightTarget.position.set(0, -10, 0);
+        scene.add(spotlightTarget);
+        spotlight.target = spotlightTarget;
+
+        droneGroup.add(spotlight);
+
+        // Position the drone
+        droneGroup.position.y = 5;
+        scene.add(droneGroup);
+
+        // Create trees function
+        function createTree(x, z, scale = 1) {
+            const treeGroup = new THREE.Group();
+
+            // Get height at position
+            const heightOffset = getTerrainHeightAt(x, z);
+
+            // Tree trunk
+            const trunkGeometry = new THREE.CylinderGeometry(0.2 * scale, 0.3 * scale, 2 * scale, 8);
+            const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+            const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
+            trunk.castShadow = true;
+            trunk.position.y = 1 * scale;
+            treeGroup.add(trunk);
+
+            // Tree top
+            const topGeometry = new THREE.ConeGeometry(1 * scale, 3 * scale, 8);
+            const topMaterial = new THREE.MeshStandardMaterial({ color: 0x2E8B57 });
+            const top = new THREE.Mesh(topGeometry, topMaterial);
+            top.position.y = (3 * scale);
+            top.castShadow = true;
+            treeGroup.add(top);
+
+            treeGroup.position.set(x, heightOffset, z);
+            scene.add(treeGroup);
+
+            return treeGroup;
+        }
+
+        // Function to get terrain height at a specific position
+        function getTerrainHeightAt(x, z) {
+            // Convert world coordinates to terrain coordinates
+            const terrainHalfSize = terrainSize / 2;
+            const terrainX = ((x + terrainHalfSize) / terrainSize) * terrainResolution;
+            const terrainZ = ((z + terrainHalfSize) / terrainSize) * terrainResolution;
+
+            // Simplified height calculation (approximation)
+            let height = Math.sin(x * 0.05) * Math.cos(z * 0.05) * 3;
+            height += Math.sin(x * 0.1 + 10) * Math.cos(z * 0.1) * 2;
+            height += Math.sin(x * 0.2 + 30) * Math.cos(z * 0.2 + 5) * 1;
+
+            return height;
+        }
+
+        // Create trees and vegetation
+        const trees = [];
+        for (let i = 0; i < 200; i++) {
+            const x = Math.random() * terrainSize - terrainSize/2;
+            const z = Math.random() * terrainSize - terrainSize/2;
+            const scale = Math.random() * 0.5 + 0.7;
+
+            // Don't place trees in water
+            if (getTerrainHeightAt(x, z) > -1.5) {
+                trees.push(createTree(x, z, scale));
+            }
+        }
+
+        // Create buildings
+        function createBuilding(x, z, width, depth, height) {
+            const buildingGroup = new THREE.Group();
+            
+            // Get height at position
+            const heightOffset = getTerrainHeightAt(x, z);
+            
+            // Building body
+            const buildingGeometry = new THREE.BoxGeometry(width, height, depth);
+            const buildingMaterial = new THREE.MeshStandardMaterial({
+                color: 0xCCCCCC,
+                roughness: 0.7,
+                metalness: 0.2
+            });
+            
+            const building = new THREE.Mesh(buildingGeometry, buildingMaterial);
+            building.position.y = height / 2;
+            building.castShadow = true;
+            building.receiveShadow = true;
+            buildingGroup.add(building);
+            
+            // Add roof
+            const roofGeometry = new THREE.BoxGeometry(width + 0.5, 0.5, depth + 0.5);
+            const roofMaterial = new THREE.MeshStandardMaterial({
+                color: 0x8B4513,
+                roughness: 0.9
+            });
+            
+            const roof = new THREE.Mesh(roofGeometry, roofMaterial);
+            roof.position.y = height + 0.25;
+            roof.castShadow = true;
+            buildingGroup.add(roof);
+            
+            // Add windows
+            const windowCount = Math.floor(height / 2);
+            const windowSize = 0.7;
+            const windowGeometry = new THREE.PlaneGeometry(windowSize, windowSize);
+            const windowMaterial = new THREE.MeshStandardMaterial({
+                color: 0x87CEEB,
+                emissive: 0x555555,
+                emissiveIntensity: 0.2,
+                transparent: true,
+                opacity: 0.9,
+                side: THREE.DoubleSide
+            });
+            
+            // Front windows
+            for (let i = 0; i < windowCount; i++) {
+                for (let j = 0; j < 2; j++) {
+                    const windowMesh = new THREE.Mesh(windowGeometry, windowMaterial);
+                    windowMesh.position.set(
+                        ((j === 0) ? -1 : 1) * width / 4,
+                        1 + i * 2,
+                        depth / 2 + 0.01
+                    );
+                    buildingGroup.add(windowMesh);
+                }
+            }
+            
+            // Side windows
+            for (let i = 0; i < windowCount; i++) {
+                for (let j = 0; j < 2; j++) {
+                    const windowMesh = new THREE.Mesh(windowGeometry, windowMaterial);
+                    windowMesh.position.set(
+                        width / 2 + 0.01,
+                        1 + i * 2,
+                        ((j === 0) ? -1 : 1) * depth / 4
+                    );
+                    windowMesh.rotation.y = Math.PI / 2;
+                    buildingGroup.add(windowMesh);
+                }
+            }
+            
+            // Add door
+            const doorGeometry = new THREE.PlaneGeometry(1, 2);
+            const doorMaterial = new THREE.MeshStandardMaterial({
+                color: 0x8B4513,
+                side: THREE.DoubleSide
+            });
+            
+            const door = new THREE.Mesh(doorGeometry, doorMaterial);
+            door.position.set(0, 1, depth / 2 + 0.02);
+            buildingGroup.add(door);
+            
+            buildingGroup.position.set(x, heightOffset, z);
+            scene.add(buildingGroup);
+            
+            return buildingGroup;
+        }
+        
+        // Add buildings - small village clusters
+        const buildings = [];
+        
+        // Village 1 - near coordinates (20, 20)
+        for (let i = 0; i < 8; i++) {
+            const x = 20 + Math.random() * 15 - 7.5;
+            const z = 20 + Math.random() * 15 - 7.5;
+            const width = Math.random() * 3 + 4;
+            const depth = Math.random() * 3 + 4;
+            const height = Math.random() * 3 + 4;
+            
+            // Don't place buildings in water
+            if (getTerrainHeightAt(x, z) > -1) {
+                buildings.push(createBuilding(x, z, width, depth, height));
+            }
+        }
+        
+        // Village 2 - near coordinates (-30, -20)
+        for (let i = 0; i < 6; i++) {
+            const x = -30 + Math.random() * 20 - 10;
+            const z = -20 + Math.random() * 20 - 10;
+            const width = Math.random() * 3 + 4;
+            const depth = Math.random() * 3 + 4;
+            const height = Math.random() * 3 + 4;
+            
+            // Don't place buildings in water
+            if (getTerrainHeightAt(x, z) > -1) {
+                buildings.push(createBuilding(x, z, width, depth, height));
+            }
+        }
+        
+        // Isolated cabins
+        for (let i = 0; i < 6; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const radius = Math.random() * 40 + 40;
+            const x = Math.cos(angle) * radius;
+            const z = Math.sin(angle) * radius;
+            const width = Math.random() * 2 + 3;
+            const depth = Math.random() * 2 + 3;
+            const height = Math.random() * 1.5 + 2.5;
+            
+            // Don't place buildings in water
+            if (getTerrainHeightAt(x, z) > -1) {
+                buildings.push(createBuilding(x, z, width, depth, height));
+            }
+        }
+
+        // Add a small city area
+        const cityCenter = { x: -60, z: 50 };
+        const citySize = 30;
+        const buildingCount = 20;
+
+        for (let i = 0; i < buildingCount; i++) {
+            // Arrange buildings in a grid-like pattern
+            const row = Math.floor(i / 5);
+            const col = i % 5;
+            const spacing = citySize / 5;
+            
+            const x = cityCenter.x + (col * spacing) - citySize/2 + Math.random() * 2;
+            const z = cityCenter.z + (row * spacing) - citySize/2 + Math.random() * 2;
+            
+            // Taller buildings for the city
+            const width = Math.random() * 4 + 5;
+            const depth = Math.random() * 4 + 5;
+            const height = Math.random() * 8 + 8; // Taller city buildings
+            
+            if (getTerrainHeightAt(x, z) > -1) {
+                const building = createBuilding(x, z, width, depth, height);
+                buildings.push(building);
+            }
+        }
+
+        // Add industrial area
+        function createIndustrialBuilding(x, z, width, depth, height) {
+            const buildingGroup = new THREE.Group();
+            const heightOffset = getTerrainHeightAt(x, z);
+            
+            // Main structure
+            const buildingGeometry = new THREE.BoxGeometry(width, height, depth);
+            const buildingMaterial = new THREE.MeshStandardMaterial({
+                color: 0x888888, // Gray industrial buildings
+                roughness: 0.8,
+                metalness: 0.4
+            });
+            
+            const building = new THREE.Mesh(buildingGeometry, buildingMaterial);
+            building.position.y = height / 2;
+            building.castShadow = true;
+            building.receiveShadow = true;
+            buildingGroup.add(building);
+            
+            // Flat roof with details
+            const roofGeometry = new THREE.BoxGeometry(width, 0.5, depth);
+            const roofMaterial = new THREE.MeshStandardMaterial({
+                color: 0x444444,
+                roughness: 0.9
+            });
+            
+            const roof = new THREE.Mesh(roofGeometry, roofMaterial);
+            roof.position.y = height + 0.25;
+            roof.castShadow = true;
+            buildingGroup.add(roof);
+            
+            // Add smokestacks/pipes
+            const pipeCount = Math.floor(Math.random() * 3) + 1;
+            for (let i = 0; i < pipeCount; i++) {
+                const pipeHeight = Math.random() * 3 + 2;
+                const pipeGeometry = new THREE.CylinderGeometry(0.5, 0.5, pipeHeight, 8);
+                const pipeMaterial = new THREE.MeshStandardMaterial({
+                    color: 0x555555,
+                    roughness: 0.7
+                });
+                
+                const pipe = new THREE.Mesh(pipeGeometry, pipeMaterial);
+                pipe.position.set(
+                    (Math.random() - 0.5) * width * 0.8,
+                    height + pipeHeight/2,
+                    (Math.random() - 0.5) * depth * 0.8
+                );
+                buildingGroup.add(pipe);
+            }
+            
+            // Add large doors/loading areas
+            const doorWidth = Math.min(width * 0.7, 3);
+            const doorHeight = Math.min(4, height * 0.8);
+            const doorGeometry = new THREE.PlaneGeometry(doorWidth, doorHeight);
+            const doorMaterial = new THREE.MeshStandardMaterial({
+                color: 0x444444,
+                side: THREE.DoubleSide
+            });
+            
+            const door = new THREE.Mesh(doorGeometry, doorMaterial);
+            door.position.set(0, doorHeight/2, depth/2 + 0.02);
+            buildingGroup.add(door);
+            
+            buildingGroup.position.set(x, heightOffset, z);
+            scene.add(buildingGroup);
+            
+            return buildingGroup;
+        }
+        
+        // Add industrial zone
+        const industrialCenter = { x: 60, z: -60 };
+        for (let i = 0; i < 8; i++) {
+            const x = industrialCenter.x + Math.random() * 40 - 20;
+            const z = industrialCenter.z + Math.random() * 40 - 20;
+            const width = Math.random() * 6 + 8;
+            const depth = Math.random() * 6 + 8;
+            const height = Math.random() * 4 + 6;
+            
+            if (getTerrainHeightAt(x, z) > -1) {
+                buildings.push(createIndustrialBuilding(x, z, width, depth, height));
+            }
+        }
+        
+        // Add a bridge over water
+        function createBridge(startX, startZ, endX, endZ, width) {
+            const bridgeGroup = new THREE.Group();
+            
+            const length = Math.sqrt(Math.pow(endX - startX, 2) + Math.pow(endZ - startZ, 2));
+            const angle = Math.atan2(endZ - startZ, endX - startX);
+            
+            // Bridge deck
+            const deckGeometry = new THREE.BoxGeometry(length, 0.5, width);
+            const deckMaterial = new THREE.MeshStandardMaterial({
+                color: 0x888888,
+                roughness: 0.8
+            });
+            
+            const deck = new THREE.Mesh(deckGeometry, deckMaterial);
+            deck.position.y = 1;
+            deck.rotation.y = angle;
+            bridgeGroup.add(deck);
+            
+            // Railings
+            const railingGeometry = new THREE.BoxGeometry(length, 1, 0.2);
+            const railingMaterial = new THREE.MeshStandardMaterial({
+                color: 0x444444
+            });
+            
+            const railing1 = new THREE.Mesh(railingGeometry, railingMaterial);
+            railing1.position.set(0, 1.5, width/2 - 0.1);
+            railing1.rotation.y = angle;
+            bridgeGroup.add(railing1);
+            
+            const railing2 = new THREE.Mesh(railingGeometry, railingMaterial);
+            railing2.position.set(0, 1.5, -width/2 + 0.1);
+            railing2.rotation.y = angle;
+            bridgeGroup.add(railing2);
+            
+            // Support columns
+            const columnCount = Math.floor(length / 5) + 1;
+            for (let i = 0; i < columnCount; i++) {
+                const progress = i / (columnCount - 1);
+                const posX = startX + (endX - startX) * progress;
+                const posZ = startZ + (endZ - startZ) * progress;
+                const height = 3;
+                
+                const columnGeometry = new THREE.BoxGeometry(1, height, 1);
+                const columnMaterial = new THREE.MeshStandardMaterial({
+                    color: 0x888888
+                });
+                
+                const column = new THREE.Mesh(columnGeometry, columnMaterial);
+                column.position.set(posX, -height/2 + 1, posZ);
+                bridgeGroup.add(column);
+            }
+            
+            bridgeGroup.position.set(0, 0, 0);
+            scene.add(bridgeGroup);
+            
+            return bridgeGroup;
+        }
+        
+        // Add a bridge over a water area
+        createBridge(-15, -15, 15, -5, 4);
+        
+        // Add a lighthouse
+        function createLighthouse(x, z) {
+            const lighthouseGroup = new THREE.Group();
+            const heightOffset = getTerrainHeightAt(x, z);
+            
+            // Base
+            const baseGeometry = new THREE.CylinderGeometry(3, 3.5, 2, 16);
+            const baseMaterial = new THREE.MeshStandardMaterial({
+                color: 0xDDDDDD
+            });
+            const base = new THREE.Mesh(baseGeometry, baseMaterial);
+            base.position.y = 1;
+            lighthouseGroup.add(base);
+            
+            // Tower
+            const towerGeometry = new THREE.CylinderGeometry(2, 2.5, 12, 16);
+            const towerMaterial = new THREE.MeshStandardMaterial({
+                color: 0xFFFFFF,
+                roughness: 0.8
+            });
+            const tower = new THREE.Mesh(towerGeometry, towerMaterial);
+            tower.position.y = 8;
+            lighthouseGroup.add(tower);
+            
+            // Red stripes
+            const stripeCount = 4;
+            for (let i = 0; i < stripeCount; i++) {
+                const stripeGeometry = new THREE.CylinderGeometry(2.01, 2.01, 1, 16);
+                const stripeMaterial = new THREE.MeshStandardMaterial({
+                    color: 0xFF0000,
+                    roughness: 0.8
+                });
+                const stripe = new THREE.Mesh(stripeGeometry, stripeMaterial);
+                stripe.position.y = 4 + i * 3;
+                lighthouseGroup.add(stripe);
+            }
+            
+            // Light housing
+            const housingGeometry = new THREE.CylinderGeometry(2.5, 2.5, 2, 16);
+            const housingMaterial = new THREE.MeshStandardMaterial({
+                color: 0x333333,
+                roughness: 0.5
+            });
+            const housing = new THREE.Mesh(housingGeometry, housingMaterial);
+            housing.position.y = 15;
+            lighthouseGroup.add(housing);
+            
+            // Light dome
+            const domeGeometry = new THREE.SphereGeometry(2, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+            const domeMaterial = new THREE.MeshStandardMaterial({
+                color: 0xFFFF00,
+                transparent: true,
+                opacity: 0.8,
+                emissive: 0xFFFF00,
+                emissiveIntensity: 0.5
+            });
+            const dome = new THREE.Mesh(domeGeometry, domeMaterial);
+            dome.position.y = 16;
+            lighthouseGroup.add(dome);
+            
+            // Actual light source
+            const light = new THREE.PointLight(0xFFFF00, 1, 100);
+            light.position.set(0, 16, 0);
+            lighthouseGroup.add(light);
+            
+            lighthouseGroup.position.set(x, heightOffset, z);
+            scene.add(lighthouseGroup);
+            
+            return lighthouseGroup;
+        }
+        
+        // Add a lighthouse near water
+        createLighthouse(-60, -80);
+
+        // Create rocks
+        function createRock(x, z, scale) {
+            const rockGeometry = new THREE.DodecahedronGeometry(scale, 0);
+            const rockMaterial = new THREE.MeshStandardMaterial({
+                color: 0x888888,
+                roughness: 0.9
+            });
+            const rock = new THREE.Mesh(rockGeometry, rockMaterial);
+
+            // Position it on the terrain
+            const heightOffset = getTerrainHeightAt(x, z);
+            rock.position.set(x, heightOffset + scale/2, z);
+
+            rock.castShadow = true;
+            rock.receiveShadow = true;
+            scene.add(rock);
+
+            return rock;
+        }
+
+        // Add rocks
+        const rocks = [];
+        for (let i = 0; i < 100; i++) {
+            const x = Math.random() * terrainSize - terrainSize/2;
+            const z = Math.random() * terrainSize - terrainSize/2;
+            const scale = Math.random() * 0.8 + 0.5;
+
+            // Don't place rocks in water
+            if (getTerrainHeightAt(x, z) > -1.5) {
+                rocks.push(createRock(x, z, scale));
+            }
+        }
+
+        // Create a person to rescue function with heat signature
+        function createPerson(x, z, pose = 'standing', heatLevel = 37) {
+            const personGroup = new THREE.Group();
+
+            // Get height at position
+            const heightOffset = getTerrainHeightAt(x, z);
+
+            // Body
+            const bodyGeometry = new THREE.CapsuleGeometry(0.3, 1, 4, 8);
+            // Color based on heat level (higher = more red)
+            const heatColor = new THREE.Color(
+                Math.min(1, 0.6 + (heatLevel-36)/10),
+                Math.max(0, 0.6 - (heatLevel-36)/10),
+                Math.max(0, 0.6 - (heatLevel-36)/10)
+            );
+
+            const bodyMaterial = new THREE.MeshStandardMaterial({
+                color: 0xDB4437, // Red jacket
+                emissive: heatColor,
+                emissiveIntensity: 0.2
+            });
+
+            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+
+            if (pose === 'standing') {
+                body.position.y = 0.8;
+                body.rotation.x = 0;
+            } else if (pose === 'laying') {
+                body.position.y = 0.3;
+                body.rotation.x = Math.PI / 2; // Person is laying down
+            } else if (pose === 'sitting') {
+                body.position.y = 0.5;
+                body.rotation.x = Math.PI / 4; // Person is sitting
+            }
+
+            personGroup.add(body);
+
+            // Head
+            const headGeometry = new THREE.SphereGeometry(0.3, 16, 16);
+            const headMaterial = new THREE.MeshStandardMaterial({
+                color: 0xF5DEB3, // Skin tone
+                emissive: heatColor,
+                emissiveIntensity: 0.2
+            });
+
+            const head = new THREE.Mesh(headGeometry, headMaterial);
+
+            if (pose === 'standing') {
+                head.position.set(0, 1.8, 0);
+            } else if (pose === 'laying') {
+                head.position.set(0, 0.3, 0.8);
+            } else if (pose === 'sitting') {
+                head.position.set(0, 1.2, 0.5);
+            }
+
+            personGroup.add(head);
+
+            // Add limbs for better recognition
+            if (pose === 'standing') {
+                // Arms
+                const armGeometry = new THREE.CapsuleGeometry(0.15, 0.7, 4, 8);
+                const leftArm = new THREE.Mesh(armGeometry, bodyMaterial);
+                leftArm.position.set(0.5, 1.2, 0);
+                leftArm.rotation.z = -Math.PI / 6;
+                personGroup.add(leftArm);
+
+                const rightArm = new THREE.Mesh(armGeometry, bodyMaterial);
+                rightArm.position.set(-0.5, 1.2, 0);
+                rightArm.rotation.z = Math.PI / 6;
+                personGroup.add(rightArm);
+
+                // Legs
+                const legGeometry = new THREE.CapsuleGeometry(0.2, 1, 4, 8);
+                const leftLeg = new THREE.Mesh(legGeometry, bodyMaterial);
+                leftLeg.position.set(0.3, 0.1, 0);
+                personGroup.add(leftLeg);
+
+                const rightLeg = new THREE.Mesh(legGeometry, bodyMaterial);
+                rightLeg.position.set(-0.3, 0.1, 0);
+                personGroup.add(rightLeg);
+            }
+
+            personGroup.position.set(x, heightOffset, z);
+            scene.add(personGroup);
+
+            // Store properties with the person
+            personGroup.userData.heatLevel = heatLevel;
+            personGroup.userData.pose = pose;
+            personGroup.userData.detected = false;
+
+            return personGroup;
+        }
+
+        // Create several people around the map with different poses and heat levels
+        const people = [];
+
+        // Group 1: Hikers lost in woods
+        people.push(createPerson(30, 40, 'standing', 37.2));
+        people.push(createPerson(31, 39, 'standing', 37.5));
+
+        // Group 2: Injured campers
+        people.push(createPerson(-40, 25, 'sitting', 38.1)); // Slight fever
+        people.push(createPerson(-42, 26, 'laying', 39.2)); // Higher fever, injured
+
+        // Group 3: Someone in water (hypothermia)
+        people.push(createPerson(-15, -30, 'laying', 32.5)); // Hypothermia
+
+        // Group 4: Hidden in dense forest
+        people.push(createPerson(50, -45, 'sitting', 37.0));
+
+        // Lone lost person
+        people.push(createPerson(-70, -60, 'laying', 36.5));
+        
+        // Additional people - Group 5: Mountain climbers in distress
+        people.push(createPerson(70, 30, 'sitting', 35.8)); // Mild hypothermia
+        people.push(createPerson(73, 32, 'laying', 34.5)); // More severe hypothermia
+        people.push(createPerson(69, 28, 'standing', 36.2)); // Group leader trying to help
+        
+        // Group 6: Trapped villagers after natural disaster
+        for (let i = 0; i < 4; i++) {
+            const x = -55 + Math.random() * 10;
+            const z = 45 + Math.random() * 10;
+            const poses = ['sitting', 'laying', 'standing'];
+            const pose = poses[Math.floor(Math.random() * poses.length)];
+            // Some with fever due to injuries
+            const temp = 36.5 + Math.random() * 3;
+            people.push(createPerson(x, z, pose, temp));
+        }
+        
+        // Group 7: Lost children in woods
+        people.push(createPerson(10, -60, 'sitting', 37.1));
+        people.push(createPerson(12, -58, 'sitting', 37.3));
+        
+        // Group 8: Campsite with people
+        const campsiteX = -20;
+        const campsiteZ = 70;
+        people.push(createPerson(campsiteX + 2, campsiteZ, 'standing', 37.0));
+        people.push(createPerson(campsiteX - 2, campsiteZ + 1, 'sitting', 37.2));
+        people.push(createPerson(campsiteX, campsiteZ - 3, 'laying', 36.8));
+        
+        // Add a campfire for the campsite
+        function createCampfire(x, z) {
+            const campfireGroup = new THREE.Group();
+            const heightOffset = getTerrainHeightAt(x, z);
+            
+            // Stones around fire
+            const stoneCount = 8;
+            for (let i = 0; i < stoneCount; i++) {
+                const angle = (i / stoneCount) * Math.PI * 2;
+                const radius = 1;
+                const stoneX = Math.cos(angle) * radius;
+                const stoneZ = Math.sin(angle) * radius;
+                
+                const stoneGeometry = new THREE.SphereGeometry(0.3 + Math.random() * 0.2, 5, 5);
+                const stoneMaterial = new THREE.MeshStandardMaterial({
+                    color: 0x888888,
+                    roughness: 0.9
+                });
+                
+                const stone = new THREE.Mesh(stoneGeometry, stoneMaterial);
+                stone.position.set(stoneX, 0.2, stoneZ);
+                stone.castShadow = true;
+                campfireGroup.add(stone);
+            }
+            
+            // Wood logs
+            for (let i = 0; i < 4; i++) {
+                const angle = (i / 4) * Math.PI * 2;
+                const logGeometry = new THREE.CylinderGeometry(0.1, 0.1, 1, 6);
+                const logMaterial = new THREE.MeshStandardMaterial({
+                    color: 0x8B4513,
+                    roughness: 0.9
+                });
+                
+                const log = new THREE.Mesh(logGeometry, logMaterial);
+                log.rotation.x = Math.PI / 2;
+                log.rotation.z = angle;
+                log.position.set(Math.cos(angle) * 0.3, 0.1, Math.sin(angle) * 0.3);
+                log.castShadow = true;
+                campfireGroup.add(log);
+            }
+            
+            // Fire (particles and light)
+            const fireLight = new THREE.PointLight(0xFF5500, 1, 15);
+            fireLight.position.set(0, 0.5, 0);
+            campfireGroup.add(fireLight);
+            
+            // Simple animated fire mesh
+            const fireGeometry = new THREE.ConeGeometry(0.5, 1, 8);
+            const fireMaterial = new THREE.MeshBasicMaterial({
+                color: 0xFF5500,
+                transparent: true,
+                opacity: 0.8
+            });
+            
+            const fire = new THREE.Mesh(fireGeometry, fireMaterial);
+            fire.position.y = 0.5;
+            campfireGroup.add(fire);
+            
+            // Add fire embers/glow
+            const glowGeometry = new THREE.SphereGeometry(0.6, 16, 16);
+            const glowMaterial = new THREE.MeshBasicMaterial({
+                color: 0xFF3300,
+                transparent: true,
+                opacity: 0.2
+            });
+            
+            const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+            glow.position.y = 0.5;
+            campfireGroup.add(glow);
+            
+            // Animate the fire in the render loop
+            const animateFire = () => {
+                fire.scale.x = 0.8 + Math.random() * 0.4;
+                fire.scale.z = 0.8 + Math.random() * 0.4;
+                fire.rotation.y += 0.05;
+                
+                glow.scale.x = 0.9 + Math.random() * 0.2;
+                glow.scale.z = 0.9 + Math.random() * 0.2;
+                
+                fireLight.intensity = 0.8 + Math.random() * 0.4;
+                
+                requestAnimationFrame(animateFire);
+            };
+            
+            animateFire();
+            
+            campfireGroup.position.set(x, heightOffset, z);
+            scene.add(campfireGroup);
+            
+            return campfireGroup;
+        }
+        
+        // Add a campfire at the campsite
+        createCampfire(campsiteX, campsiteZ);
+        
+        // Create a tent function
+        function createTent(x, z, rotation = 0) {
+            const tentGroup = new THREE.Group();
+            const heightOffset = getTerrainHeightAt(x, z);
+            
+            // Tent body
+            const tentGeometry = new THREE.ConeGeometry(1.5, 1.8, 4, 1, false, Math.PI/4);
+            const tentMaterial = new THREE.MeshStandardMaterial({
+                color: 0x3368A1, // Blue tent
+                roughness: 0.8
+            });
+            
+            const tent = new THREE.Mesh(tentGeometry, tentMaterial);
+            tent.position.y = 0.9;
+            tent.rotation.y = rotation;
+            tent.scale.z = 1.5; // Make it longer
+            tent.castShadow = true;
+            tentGroup.add(tent);
+            
+            // Tent entrance (front triangle)
+            const entranceGeometry = new THREE.CircleGeometry(1.5, 3);
+            const entranceMaterial = new THREE.MeshStandardMaterial({
+                color: 0x1E4976, // Darker blue
+                roughness: 0.8,
+                side: THREE.DoubleSide
+            });
+            
+            const entrance = new THREE.Mesh(entranceGeometry, entranceMaterial);
+            entrance.position.set(0, 0.9, 1.5 * 0.75);
+            entrance.rotation.x = Math.PI / 2;
+            entrance.rotation.y = rotation;
+            tentGroup.add(entrance);
+            
+            // Tent floor
+            const floorGeometry = new THREE.CircleGeometry(1.5, 16);
+            const floorMaterial = new THREE.MeshStandardMaterial({
+                color: 0x444444,
+                roughness: 0.9
+            });
+            
+            const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+            floor.rotation.x = -Math.PI / 2;
+            floor.position.y = 0.01;
+            tentGroup.add(floor);
+            
+            tentGroup.position.set(x, heightOffset, z);
+            scene.add(tentGroup);
+            
+            return tentGroup;
+        }
+        
+        // Add tents to the campsite
+        createTent(campsiteX + 3, campsiteZ + 2, Math.PI/4);
+        createTent(campsiteX - 3, campsiteZ + 1, -Math.PI/6);
+        
+        // Create a mountainside village
+        const mountainVillageCenter = { x: 75, z: 15 };
+        
+        // Create terraced field function
+        function createTerracedField(x, z, width, depth) {
+            const fieldGroup = new THREE.Group();
+            const heightOffset = getTerrainHeightAt(x, z);
+            
+            // Create the terraced field
+            const terraceGeometry = new THREE.BoxGeometry(width, 0.5, depth);
+            const terraceMaterial = new THREE.MeshStandardMaterial({
+                color: 0x9B7653, // Brown soil
+                roughness: 0.9
+            });
+            
+            const terrace = new THREE.Mesh(terraceGeometry, terraceMaterial);
+            terrace.position.y = 0.25;
+            terrace.receiveShadow = true;
+            fieldGroup.add(terrace);
+            
+            // Add crops - simple green patches
+            const cropRows = 5;
+            const cropColumns = Math.floor(width / 0.5);
+            
+            for (let i = 0; i < cropRows; i++) {
+                for (let j = 0; j < cropColumns; j++) {
+                    if (Math.random() > 0.3) { // Some empty spots
+                        const cropGeometry = new THREE.BoxGeometry(0.4, 0.2, 0.4);
+                        const cropMaterial = new THREE.MeshStandardMaterial({
+                            color: 0x7CFC00, // Bright green
+                            roughness: 0.8
+                        });
+                        
+                        const crop = new THREE.Mesh(cropGeometry, cropMaterial);
+                        crop.position.set(
+                            j * 0.5 - width/2 + 0.25,
+                            0.6,
+                            i * 0.5 - depth/2 + 0.25
+                        );
+                        fieldGroup.add(crop);
+                    }
+                }
+            }
+            
+            fieldGroup.position.set(x, heightOffset, z);
+            scene.add(fieldGroup);
+            
+            return fieldGroup;
+        }
+        
+        // Add terraced fields to the mountain village
+        createTerracedField(mountainVillageCenter.x - 5, mountainVillageCenter.z + 8, 8, 4);
+        createTerracedField(mountainVillageCenter.x + 6, mountainVillageCenter.z + 10, 10, 5);
+        
+        // Create unique mountain houses
+        function createMountainHouse(x, z, size = 1) {
+            const houseGroup = new THREE.Group();
+            const heightOffset = getTerrainHeightAt(x, z);
+            
+            // Base - stone foundation
+            const baseGeometry = new THREE.BoxGeometry(4 * size, 0.5 * size, 4 * size);
+            const baseMaterial = new THREE.MeshStandardMaterial({
+                color: 0x888888,
+                roughness: 0.9
+            });
+            
+            const base = new THREE.Mesh(baseGeometry, baseMaterial);
+            base.position.y = 0.25 * size;
+            base.receiveShadow = true;
+            base.castShadow = true;
+            houseGroup.add(base);
+            
+            // Main structure - wood
+            const houseGeometry = new THREE.BoxGeometry(3.5 * size, 2.5 * size, 3.5 * size);
+            const houseMaterial = new THREE.MeshStandardMaterial({
+                color: 0xA0522D, // Sienna brown
+                roughness: 0.8
+            });
+            
+            const house = new THREE.Mesh(houseGeometry, houseMaterial);
+            house.position.y = 1 * size + 0.25 * size;
+            house.castShadow = true;
+            houseGroup.add(house);
+            
+            // Roof - steep triangular
+            const roofGeometry = new THREE.ConeGeometry(3 * size, 2 * size, 4);
+            const roofMaterial = new THREE.MeshStandardMaterial({
+                color: 0x8B4513, // Saddle brown
+                roughness: 0.9
+            });
+            
+            const roof = new THREE.Mesh(roofGeometry, roofMaterial);
+            roof.position.y = 2.5 * size + 0.25 * size + 1 * size;
+            roof.rotation.y = Math.PI / 4;
+            roof.castShadow = true;
+            houseGroup.add(roof);
+            
+            // Windows
+            const windowGeometry = new THREE.PlaneGeometry(0.6 * size, 0.6 * size);
+            const windowMaterial = new THREE.MeshStandardMaterial({
+                color: 0xADD8E6, // Light blue
+                transparent: true,
+                opacity: 0.7,
+                side: THREE.DoubleSide
+            });
+            
+            // Add windows on each side
+            const sides = [
+                { x: 0, z: 1.76 * size, rot: 0 },
+                { x: 1.76 * size, z: 0, rot: Math.PI / 2 },
+                { x: 0, z: -1.76 * size, rot: Math.PI },
+                { x: -1.76 * size, z: 0, rot: -Math.PI / 2 }
+            ];
+            
+            sides.forEach(side => {
+                const window = new THREE.Mesh(windowGeometry, windowMaterial);
+                window.position.set(side.x, 1 * size + 0.25 * size, side.z);
+                window.rotation.y = side.rot;
+                houseGroup.add(window);
+            });
+            
+            // Door
+            const doorGeometry = new THREE.PlaneGeometry(0.8 * size, 1.5 * size);
+            const doorMaterial = new THREE.MeshStandardMaterial({
+                color: 0x8B4513,
+                side: THREE.DoubleSide
+            });
+            
+            const door = new THREE.Mesh(doorGeometry, doorMaterial);
+            door.position.set(0, 0.5 * size + 0.25 * size, 1.76 * size + 0.01);
+            houseGroup.add(door);
+            
+            // Chimney
+            const chimneyGeometry = new THREE.BoxGeometry(0.6 * size, 1.5 * size, 0.6 * size);
+            const chimneyMaterial = new THREE.MeshStandardMaterial({
+                color: 0x8B4513,
+                roughness: 0.9
+            });
+            
+            const chimney = new THREE.Mesh(chimneyGeometry, chimneyMaterial);
+            chimney.position.set(1 * size, 3 * size + 0.25 * size, 1 * size);
+            chimney.castShadow = true;
+            houseGroup.add(chimney);
+            
+            // Smoke from chimney
+            const smokeParticles = [];
+            for (let i = 0; i < 5; i++) {
+                const smokeGeometry = new THREE.SphereGeometry(0.2 * size, 8, 8);
+                const smokeMaterial = new THREE.MeshBasicMaterial({
+                    color: 0xDDDDDD,
+                    transparent: true,
+                    opacity: 0.5
+                });
+                
+                const smoke = new THREE.Mesh(smokeGeometry, smokeMaterial);
+                smoke.position.set(
+                    1 * size + (Math.random() * 0.2 - 0.1) * size,
+                    (3.5 + i * 0.3) * size + 0.25 * size, 
+                    1 * size + (Math.random() * 0.2 - 0.1) * size
+                );
+                smoke.userData = {
+                    velocity: new THREE.Vector3(
+                        (Math.random() * 0.1 - 0.05) * size,
+                        (0.05 + Math.random() * 0.05) * size,
+                        (Math.random() * 0.1 - 0.05) * size
+                    )
+                };
+                smokeParticles.push(smoke);
+                houseGroup.add(smoke);
+            }
+            
+            // Animate the smoke
+            const animateSmoke = () => {
+                smokeParticles.forEach(particle => {
+                    particle.position.add(particle.userData.velocity);
+                    particle.material.opacity -= 0.003;
+                    
+                    if (particle.material.opacity < 0) {
+                        // Reset particle
+                        particle.position.set(
+                            1 * size + (Math.random() * 0.2 - 0.1) * size,
+                            3.5 * size + 0.25 * size,
+                            1 * size + (Math.random() * 0.2 - 0.1) * size
+                        );
+                        particle.material.opacity = 0.5;
+                    }
+                });
+                
+                requestAnimationFrame(animateSmoke);
+            };
+            
+            animateSmoke();
+            
+            houseGroup.position.set(x, heightOffset, z);
+            scene.add(houseGroup);
+            
+            return houseGroup;
+        }
+        
+        // Add mountain houses
+        for (let i = 0; i < 6; i++) {
+            const angle = i * Math.PI / 3;
+            const radius = 8;
+            const x = mountainVillageCenter.x + Math.cos(angle) * radius;
+            const z = mountainVillageCenter.z + Math.sin(angle) * radius;
+            const size = 0.8 + Math.random() * 0.4;
+            
+            createMountainHouse(x, z, size);
+        }
+
+        // Controls
+        const keys = {};
+        const moveSpeed = 0.2;
+        const rotateSpeed = 0.05;
+
+        document.addEventListener('keydown', (event) => {
+            keys[event.key] = true;
+        });
+
+        document.addEventListener('keyup', (event) => {
+            keys[event.key] = false;
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            mainCamera.aspect = window.innerWidth / window.innerHeight;
+            mainCamera.updateProjectionMatrix();
+            dronePOVCamera.aspect = window.innerWidth / window.innerHeight;
+            dronePOVCamera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Toggle camera view
+        document.getElementById('toggle-view').addEventListener('click', () => {
+            activeCamera = activeCamera === mainCamera ? dronePOVCamera : mainCamera;
+        });
+
+        // Thermal view toggle
+        let thermalViewActive = false;
+        document.getElementById('toggle-thermal').addEventListener('click', () => {
+            thermalViewActive = !thermalViewActive;
+            updateThermalDisplay();
+        });
+
+        // Mission control
+        let autoMode = false;
+        let missionPath = [];
+        let currentPathIndex = 0;
+        let missionStatus = "Standby";
+        let searchPattern = "None";
+        let peopleDetected = 0;
+        
+        // Log for detected people
+        const detectedPeopleLog = [];
+        let logElement = null;
+
+        // Create a log display element
+        function createLogDisplay() {
+            logElement = document.createElement('div');
+            logElement.id = 'detection-log';
+            logElement.style.position = 'absolute';
+            logElement.style.left = '20px';
+            logElement.style.top = '220px';
+            logElement.style.padding = '10px';
+            logElement.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+            logElement.style.border = '1px solid #444';
+            logElement.style.borderRadius = '5px';
+            logElement.style.color = 'white';
+            logElement.style.zIndex = '100';
+            logElement.style.fontSize = '14px';
+            logElement.style.maxWidth = '250px';
+            logElement.style.maxHeight = '300px';
+            logElement.style.overflowY = 'auto';
+            
+            logElement.innerHTML = '<h3>Detection Log</h3><p>No detections yet</p>';
+            document.body.appendChild(logElement);
+        }
+
+        // Automatic search mode
+        document.getElementById('start-auto').addEventListener('click', () => {
+            autoMode = true;
+            manualMode = false;
+
+            // Increase speed for automatic search
+            droneMovement.maxSpeed = 40; // Double the default speed
+            droneMovement.acceleration = 15; // Higher acceleration for faster response
+
+            // Generate a search pattern - spiral outward
+            missionPath = generateSearchPattern();
+            currentPathIndex = 0;
+            missionStatus = "Searching";
+            searchPattern = "Spiral Outward";
+            updateMissionStatus();
+        });
+
+        // Manual control mode
+        let manualMode = true;
+        document.getElementById('manual-control').addEventListener('click', () => {
+            autoMode = false;
+            manualMode = true;
+            
+            // Reset to normal speed for manual control
+            droneMovement.maxSpeed = 20;
+            droneMovement.acceleration = 8;
+            
+            missionStatus = "Manual Control";
+            searchPattern = "None";
+            updateMissionStatus();
+        });
+
+        // Generate a search pattern
+        function generateSearchPattern() {
+            const path = [];
+            // Spiral pattern
+            const spiralPoints = 100;
+            const maxRadius = 80;
+
+            for (let i = 0; i < spiralPoints; i++) {
+                const angle = 0.3 * i;
+                const radius = (i / spiralPoints) * maxRadius;
+                const x = radius * Math.cos(angle);
+                const z = radius * Math.sin(angle);
+                path.push({ x, y: 20, z }); // y is altitude
+            }
+
+            return path;
+        }
+
+        // Detect heat signatures within range
+        function detectHeatSources() {
+            const maxDetectionRange = 30; // meters
+            
+            people.forEach(person => {
+                const dx = person.position.x - droneGroup.position.x;
+                const dz = person.position.z - droneGroup.position.z;
+                const distance = Math.sqrt(dx * dx + dz * dz);
+                
+                // Check if person is within detection range and not already detected
+                if (distance < maxDetectionRange && !person.userData.detected && thermalViewActive) {
+                    // Mark as detected
+                    person.userData.detected = true;
+                    peopleDetected++;
+                    
+                    // Log the detection
+                    detectedPeopleLog.push({
+                        id: detectedPeopleLog.length + 1,
+                        x: person.position.x,
+                        z: person.position.z,
+                        y: person.position.y,
+                        temperature: person.userData.heatLevel,
+                        pose: person.userData.pose,
+                        detectedAt: new Date().toLocaleTimeString()
+                    });
+                    
+                    // Update mission status and log display
+                    updateMissionStatus();
+                    updateLogDisplay();
+                    
+                    // Visual feedback - make the person slightly glow to indicate detection
+                    const allMeshes = [];
+                    person.traverse(child => {
+                        if (child.isMesh) allMeshes.push(child);
+                    });
+                    
+                    allMeshes.forEach(mesh => {
+                        mesh.material.emissiveIntensity = 0.5;
+                    });
+                }
+            });
+        }
+
+        // Update thermal display
+        function updateThermalDisplay() {
+            const thermalView = document.getElementById('thermal-view');
+            const statusIndicator = thermalView.querySelector('.status-indicator');
+            const coordinates = thermalView.querySelector('.coordinates');
+            const heatReading = thermalView.querySelector('.heat-reading');
+
+            // Clear existing heat signatures
+            const existingSignatures = thermalView.querySelectorAll('.heat-signature');
+            existingSignatures.forEach(sig => sig.remove());
+
+            if (thermalViewActive) {
+              // Update status
+              statusIndicator.textContent = `STATUS: ACTIVE - THERMAL SCAN`;
+              statusIndicator.style.color = "#ff0000";
+          
+              // Update coordinates
+              coordinates.textContent = `POS: ${droneGroup.position.x.toFixed(1)}, ${droneGroup.position.z.toFixed(1)}`;
+
+        // Detect heat signatures within range
+              const maxDetectionRange = 30; // meters
+              let closestPersonDistance = Infinity;
+              let closestPerson = null;
+          
+              people.forEach(person => {
+                  const dx = person.position.x - droneGroup.position.x;
+                  const dz = person.position.z - droneGroup.position.z;
+                  const distance = Math.sqrt(dx * dx + dz * dz);
+          
+                  // Check if person is within detection range
+                  if (distance < maxDetectionRange) {
+                      // Convert 3D world position to 2D screen position
+                      const screenX = (dx / maxDetectionRange) * 160 + 160; // Centered on 320px wide display
+                      const screenY = (dz / maxDetectionRange) * 100 + 100; // Centered on ~200px high display
+          
+                      // Create a heat signature blob
+                      const heatSig = document.createElement('div');
+                      heatSig.className = 'heat-signature';
+          
+                      // Size and intensity based on distance
+                      const size = Math.max(5, 20 - (distance / maxDetectionRange) * 15);
+          
+                      // Color based on temperature
+                      const temp = person.userData.heatLevel;
+                      let color;
+          
+                      if (temp < 35) {
+                          // Hypothermia - blue
+                          color = 'rgba(0, 0, 255, 0.8)';
+                      } else if (temp < 36.5) {
+                          // Cool - blue-green
+                          color = 'rgba(0, 255, 200, 0.8)';
+                      } else if (temp < 37.5) {
+                          // Normal - yellow-orange
+                          color = 'rgba(255, 200, 0, 0.8)';
+                      } else if (temp < 38.5) {
+                          // Fever - orange
+                          color = 'rgba(255, 150, 0, 0.8)';
+                      } else {
+                          // High fever - red
+                          color = 'rgba(255, 0, 0, 0.8)';
+                      }
+          
+                      heatSig.style.width = `${size}px`;
+                      heatSig.style.height = `${size}px`;
+                      heatSig.style.backgroundColor = color;
+                      heatSig.style.position = 'absolute';
+                      heatSig.style.left = `${screenX}px`;
+                      heatSig.style.top = `${screenY}px`;
+          
+                      thermalView.appendChild(heatSig);
+          
+                      // Track closest person
+                      if (distance < closestPersonDistance) {
+                          closestPersonDistance = distance;
+                          closestPerson = person;
+                      }
+                  }
+              });
+          
+              // Update heat reading for the closest person
+              if (closestPerson) {
+                  heatReading.textContent = `HEAT: ${closestPerson.userData.heatLevel.toFixed(1)}°C`;
+                  heatReading.style.color = "#ff0000";
+              } else {
+                  heatReading.textContent = `HEAT: --°C`;
+                  heatReading.style.color = "#00ff00";
+              }
+          } 
+          else {
+              // Thermal view inactive
+              statusIndicator.textContent = `STATUS: STANDBY`;
+              statusIndicator.style.color = "#00ff00";
+              coordinates.textContent = `POS: --, --`;
+              heatReading.textContent = `HEAT: --°C`;
+              heatReading.style.color = "#00ff00";
+          }
+          
+        }
+        
+        // Animation loop
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+
+            // Rotate the rotors for effect
+            rotors.forEach((rotor, i) => {
+                rotor.rotation.y += (i % 2 ? 0.5 : -0.5);
+            });
+
+            // Handle automatic search mode
+            if (autoMode) {
+                if (currentPathIndex < missionPath.length) {
+                    const target = missionPath[currentPathIndex];
+                    
+                    // Set the target position for smooth movement
+                    droneMovement.targetPosition.set(target.x, target.y, target.z);
+                    
+                    // Calculate distance to target
+                    const distance = droneGroup.position.distanceTo(droneMovement.targetPosition);
+
+                    if (distance > 1) {
+                        // Calculate direction vector
+                        const direction = new THREE.Vector3(
+                            droneMovement.targetPosition.x - droneGroup.position.x,
+                            droneMovement.targetPosition.y - droneGroup.position.y,
+                            droneMovement.targetPosition.z - droneGroup.position.z
+                        ).normalize();
+                        
+                        // Calculate target velocity based on distance and max speed
+                        const targetSpeed = Math.min(droneMovement.maxSpeed, distance);
+                        
+                        // Apply acceleration towards the target speed
+                        droneMovement.velocity.x += direction.x * droneMovement.acceleration * delta;
+                        droneMovement.velocity.y += direction.y * droneMovement.acceleration * delta;
+                        droneMovement.velocity.z += direction.z * droneMovement.acceleration * delta;
+                        
+                        // Clamp velocity to max speed
+                        const speed = droneMovement.velocity.length();
+                        if (speed > targetSpeed) {
+                            droneMovement.velocity.multiplyScalar(targetSpeed / speed);
+                        }
+                        
+                        // Gradually apply damping to smooth out movement
+                        droneMovement.velocity.multiplyScalar(Math.pow(droneMovement.dampening, delta * 10));
+                        
+                        // Update position
+                        droneGroup.position.add(droneMovement.velocity.clone().multiplyScalar(delta));
+                        
+                        // Gradually rotate the drone to face movement direction
+                        if (droneMovement.velocity.length() > 0.1) {
+                            const targetRotation = Math.atan2(droneMovement.velocity.x, -droneMovement.velocity.z);
+                            const deltaRotation = targetRotation - droneGroup.rotation.y;
+                            
+                            // Normalize to the shortest rotation path
+                            let normalizedDelta = deltaRotation;
+                            while (normalizedDelta > Math.PI) normalizedDelta -= Math.PI * 2;
+                            while (normalizedDelta < -Math.PI) normalizedDelta += Math.PI * 2;
+                            
+                            // Apply rotation with smooth interpolation
+                            droneGroup.rotation.y += normalizedDelta * Math.min(delta * droneMovement.rotationSpeed, 1);
+                        }
+                    } else {
+                        // We've reached the target, move to the next waypoint
+                        currentPathIndex++;
+                        
+                        // Reset velocity when reaching a waypoint for smoother transitions
+                        droneMovement.velocity.multiplyScalar(0.5);
+                    }
+                    
+                    // Check for heat sources during automatic search
+                    if (thermalViewActive) {
+                        detectHeatSources();
+                    }
+                } else {
+                    missionStatus = "Search Complete";
+                    updateMissionStatus();
+                }
+            }
+
+            // Handle manual controls
+            if (manualMode) {
+                // Initialize movement vector
+                const movement = new THREE.Vector3(0, 0, 0);
+                
+                if (keys['ArrowUp']) {
+                    movement.z -= moveSpeed;
+                }
+                if (keys['ArrowDown']) {
+                    movement.z += moveSpeed;
+                }
+                if (keys['ArrowLeft']) {
+                    movement.x -= moveSpeed;
+                }
+                if (keys['ArrowRight']) {
+                    movement.x += moveSpeed;
+                }
+                if (keys['w']) {
+                    movement.y += moveSpeed;
+                }
+                if (keys['s']) {
+                    movement.y -= moveSpeed;
+                }
+                
+                // Apply rotation to movement vector to move in the direction the drone is facing
+                movement.applyAxisAngle(new THREE.Vector3(0, 1, 0), droneGroup.rotation.y);
+                
+                // Apply movement with smooth acceleration
+                droneMovement.velocity.x += movement.x * droneMovement.acceleration * delta;
+                droneMovement.velocity.y += movement.y * droneMovement.acceleration * delta;
+                droneMovement.velocity.z += movement.z * droneMovement.acceleration * delta;
+                
+                // Apply damping for deceleration when no keys are pressed
+                droneMovement.velocity.multiplyScalar(Math.pow(droneMovement.dampening, delta * 10));
+                
+                // Update position
+                droneGroup.position.add(droneMovement.velocity.clone().multiplyScalar(delta));
+                
+                // Don't let the drone go below ground
+                if (droneGroup.position.y < 0.5) {
+                    droneGroup.position.y = 0.5;
+                    droneMovement.velocity.y = 0;
+                }
+                
+                // Handle rotation
+                if (keys['q']) {
+                    droneGroup.rotation.y += rotateSpeed;
+                }
+                if (keys['e']) {
+                    droneGroup.rotation.y -= rotateSpeed;
+                }
+            }
+
+            // Update spotlight direction to match drone rotation
+            spotlightTarget.position.x = droneGroup.position.x + 5 * Math.sin(droneGroup.rotation.y);
+            spotlightTarget.position.z = droneGroup.position.z - 5 * Math.cos(droneGroup.rotation.y);
+            spotlightTarget.position.y = -5;
+
+            // Update camera to follow drone
+            activeCamera.position.x = droneGroup.position.x + 10 * Math.sin(droneGroup.rotation.y);
+            activeCamera.position.z = droneGroup.position.z + 10 * Math.cos(droneGroup.rotation.y);
+            activeCamera.position.y = droneGroup.position.y + 5;
+            activeCamera.lookAt(droneGroup.position);
+
+            // Update thermal display
+            updateThermalDisplay();
+
+            renderer.render(scene, activeCamera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
+        
